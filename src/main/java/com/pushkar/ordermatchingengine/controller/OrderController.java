@@ -16,9 +16,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pushkar.ordermatchingengine.dto.OrderRequest;
+import com.pushkar.ordermatchingengine.entity.TradeEntity;
 import com.pushkar.ordermatchingengine.model.Order;
 import com.pushkar.ordermatchingengine.model.OrderBook;
 import com.pushkar.ordermatchingengine.model.Trade;
+import com.pushkar.ordermatchingengine.repository.TradeRepository;
 import com.pushkar.ordermatchingengine.service.OrderBookService;
 
 import jakarta.validation.Valid;
@@ -27,15 +29,29 @@ import jakarta.validation.Valid;
 @RequestMapping("/api/orders")
 public class OrderController {
     private final OrderBookService orderBookService;
+    private final TradeRepository tradeRepository;
 
-    public OrderController(OrderBookService orderBookService) {
+    public OrderController(OrderBookService orderBookService, TradeRepository tradeRepository) {
         this.orderBookService = orderBookService;
+        this.tradeRepository = tradeRepository;
     }
 
     @PostMapping 
     public ResponseEntity<Map<String, Object>> submitOrder(@Valid @RequestBody OrderRequest request) {
         Order order = new Order(request.getSymbol(), request.getSide(), request.getPrice(), request.getQuantity());
         List<Trade> trades = orderBookService.submitOrder(order);
+
+        for(Trade trade : trades) {
+            tradeRepository.save(new TradeEntity(
+                trade.getTradeId(),
+                request.getSymbol(),
+                trade.getBuyOrderId(),
+                trade.getSellOrderId(),
+                trade.getPrice(),
+                trade.getQuantity(),
+                trade.getExecutedAt()
+            ));
+        }
         
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
             "orderId", order.getOrderId(),
@@ -59,5 +75,10 @@ public class OrderController {
         summary.put("bestBid", book.getBestBidPrice());
         summary.put("bestAsk", book.getBestAskPrice());
         return ResponseEntity.ok(summary);
+    }
+
+    @GetMapping("/{symbol}/trades")
+    public ResponseEntity<List<TradeEntity>> getTradeHistory(@PathVariable String symbol) {
+        return ResponseEntity.ok(tradeRepository.findBySymbolOrderByExecutedAtDesc(symbol));
     }
 }
