@@ -9,11 +9,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.TreeMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class OrderBook {
     private final String symbol;
     private final TreeMap<BigDecimal, Queue<Order>> buyOrders = new TreeMap<>(Comparator.reverseOrder());
     private final TreeMap<BigDecimal, Queue<Order>> sellOrders = new TreeMap<>(Comparator.naturalOrder());
+    private final ReentrantLock lock = new ReentrantLock();
     private final Map<String, Order> orderIndex = new HashMap<>();
 
     public OrderBook(String symbol) {
@@ -21,10 +23,15 @@ public class OrderBook {
     }
 
     public List<Trade> submitOrder(Order order) {
-        List<Trade> trades = new ArrayList<>();
-        match(order, trades);
-        if(order.getQuantity().compareTo(BigDecimal.ZERO) > 0) addToBook(order);
-        return trades;
+        lock.lock();
+        try {
+            List<Trade> trades = new ArrayList<>();
+            match(order, trades);
+            if(order.getQuantity().compareTo(BigDecimal.ZERO) > 0) addToBook(order);
+            return trades;
+        } finally {
+            lock.unlock();
+        }
     }
 
     private void match(Order incoming, List<Trade> trades) {
@@ -60,18 +67,23 @@ public class OrderBook {
     }
 
     public boolean cancelOrder(String orderId) {
-        Order order = orderIndex.get(orderId);
-        if(order == null) return false;
+        lock.lock();
+        try {
+            Order order = orderIndex.get(orderId);
+            if(order == null) return false;
 
-        TreeMap<BigDecimal, Queue<Order>> book = order.getSide() == OrderSide.BUY ? buyOrders : sellOrders;
-        Queue<Order> queue = book.get(order.getPrice());
-        if(queue != null) {
-            queue.remove(order);
-            if(queue.isEmpty()) book.remove(order.getPrice());
+            TreeMap<BigDecimal, Queue<Order>> book = order.getSide() == OrderSide.BUY ? buyOrders : sellOrders;
+            Queue<Order> queue = book.get(order.getPrice());
+
+            if(queue != null) {
+                queue.remove(order);
+                if(queue.isEmpty()) book.remove(order.getPrice());
+            }
+            orderIndex.remove(orderId);
+            return true;
+        } finally {
+            lock.unlock();
         }
-
-        orderIndex.remove(orderId);
-        return true;
     }
     
     public BigDecimal getBestBidPrice() {
